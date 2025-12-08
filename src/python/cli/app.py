@@ -87,6 +87,7 @@ class AIVideoApp:
     
     def run(self):
         """运行应用程序"""
+        
         print("\n选择运行模式:")
         print("1. 本地处理模式 - 无需网络传输")
         print("2. 客户端模式 - 推送视频流")
@@ -131,10 +132,24 @@ class AIVideoApp:
                     time.sleep(1)
             except KeyboardInterrupt:
                 print("\n正在退出程序...")
-                if self.handler:
+                if self.handler and hasattr(self.handler, 'get_pipeline_fps'):
+                    final_pipeline_fps = self.handler.get_pipeline_fps()
+                    print(f"Final reported Pipeline FPS: {final_pipeline_fps:.2f}")  
+                    avg_pipeline_fps = self.handler.get_avg_pipeline_fps()
+                    print(f"Average Pipeline FPS over runtime: {avg_pipeline_fps:.2f}")
                     self.handler.stop()
                 if self.camera_stream:
                     self.camera_stream.stop()
+
+                metrics = self.ai_processor.get_inference_metrics()
+                print("\n=== YOLOv11 Inference Performance Summary ===")
+                print(f"Average Inference Time: {metrics['avg_inference_ms']} ms")
+                print(f"Inference Throughput (FPS): {metrics['fps']}")
+                print(f"Stability (Success Rate): {metrics['stability'] * 100:.2f}%")
+                print(f"Total Frames Processed: {metrics['total_frames']}")
+                print(f"Inference Failures: {metrics['failed_frames']}")  
+
+                
 
 
 # 用于测试

@@ -12,6 +12,7 @@ import struct
 import pickle
 import numpy as np
 import os
+import time
 
 
 class CLIBaseHandler:
@@ -57,7 +58,22 @@ class CLILocalHandler(CLIBaseHandler):
         self.config_thread = threading.Thread(target=self.config_loop)
         self.config_thread.daemon = True
         self.config_thread.start()
+
+        #metrics
+        self._fps_frame_count = 0
+        self._fps_last_time = time.time()
+        self._current_fps = 0.0
+        self._total_frames = 0
+        self._start_time = time.time()
     
+    def get_pipeline_fps(self): #getter
+        """Returns the latest 1-second window FPS (end-to-end pipeline)"""
+        return self._current_fps
+    
+    def get_avg_pipeline_fps(self):
+        elapsed = time.time() - self._start_time
+        return self._total_frames / elapsed if elapsed > 0 else 0.0
+
     def config_loop(self):
         """配置循环，允许用户修改参数"""
         print("\n=== 本地处理模式配置 ===")
@@ -149,6 +165,7 @@ class CLILocalHandler(CLIBaseHandler):
         frame_count = 0
         last_fps_time = time.time()
         fps = 0
+
         
         # 视频显示检查标志
         showed_video = False
@@ -164,18 +181,29 @@ class CLILocalHandler(CLIBaseHandler):
             frame_count += 1
             current_time = time.time()
             elapsed = current_time - last_fps_time
+
+            self._fps_frame_count += 1
+            self._total_frames += 1
+
+            # Update FPS value every ~1 second
+            current_time = time.time()
+            if current_time - self._fps_last_time >= 1.0:
+                elapsed = current_time - self._fps_last_time
+                self._current_fps = self._fps_frame_count / elapsed
+                self._fps_frame_count = 0 #reset every second for instantaneous fps
+                self._fps_last_time = current_time
             
             if elapsed >= 1.0:
                 fps = frame_count / elapsed
                 frame_count = 0
                 last_fps_time = current_time
-                print(f"FPS: {fps:.1f}")
+                print(f"FPS: {self._current_fps:.1f}")
             
             # 在原始帧上添加信息
             original_display = frame.copy()
             cv2.putText(
                 original_display, 
-                f"Original Video - FPS: {fps:.1f}", 
+                f"Original Video - FPS: {self._current_fps:.1f}", 
                 (10, 30), 
                 cv2.FONT_HERSHEY_SIMPLEX, 
                 0.7, 
@@ -196,7 +224,7 @@ class CLILocalHandler(CLIBaseHandler):
                 # 在处理后的图像上添加FPS和QP信息
                 cv2.putText(
                     processed_frame, 
-                    f"Processed Video - FPS: {fps:.1f}", 
+                    f"Processed Video - FPS: {self._current_fps:.1f}", 
                     (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     0.7, 
@@ -256,7 +284,8 @@ class CLILocalHandler(CLIBaseHandler):
                 self.update_status(f"处理错误: {e}")
             
             # 控制帧率
-            time.sleep(0.01)
+            if frame is None:
+                time.sleep(0.01)
         
         # 如果支持GUI，关闭窗口
         if has_gui_support:

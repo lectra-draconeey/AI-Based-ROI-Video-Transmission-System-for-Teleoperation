@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import os
 from ultralytics import YOLO
+import sys
+import time
 
 
 class Processor:
@@ -10,12 +12,18 @@ class Processor:
     def __init__(self, model_weights="yolo11n", model_cfg=None, class_names=None):
         """
         Initializes the AI Processor
+        
 
         Args:
             model_weights: YOLO model name (without suffix, e.g., 'yolo11n') or custom model path
             model_cfg: Deprecated, kept for backward compatibility
             class_names: Deprecated, kept for backward compatibility
         """
+        # Performance metrics
+        self.inference_times = []      # list of inference durations in ms
+        self.total_frames = 0          # total frames submitted for processing
+        self.failed_frames = 0         # frames where inference raised an exception
+
         try:
             # Ensure the models directory exists
             models_dir = os.path.abspath('models')
@@ -34,6 +42,7 @@ class Processor:
                 if os.path.exists(potential_model_path):
                     model_path = potential_model_path
                     print(f"Using local model: {model_path}")
+
 
             # Load model using ultralytics
             # Prioritize automatic selection of the most suitable model version for the system
@@ -75,8 +84,22 @@ class Processor:
         # Get image dimensions
         height, width, _ = frame.shape
 
-        # Perform object detection using YOLOv11
-        results = self.net(frame, conf=self.conf_threshold, iou=self.nms_threshold, verbose=False)
+        self.total_frames += 1
+
+        try:
+            # Perform object detection using YOLOv11
+            start_time = time.perf_counter()
+            results = self.net(frame, conf=self.conf_threshold, iou=self.nms_threshold, verbose=False)
+            end_time = time.perf_counter()
+            inference_ms = (end_time - start_time) * 1000
+            self.inference_times.append(inference_ms)
+        except Exception as e:
+            self.failed_frames += 1
+            print(f"Error during inference: {e}")
+            if return_rois:
+                return original_frame, []
+            return original_frame    
+
 
         # Create a mask image to mark ROI regions
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -222,6 +245,34 @@ class Processor:
         cv2.putText(result, f"Non-ROI QP: {non_roi_qp}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         return result.astype(np.uint8)
+    
+    def get_inference_metrics(self):
+        """
+        Returns aggregated inference performance metrics.
+        
+        Returns:
+            dict: Contains avg_inference_ms, fps, stability, total_frames, failed_frames
+        """
+        if not self.inference_times:
+            return {
+                "avg_inference_ms": 0.0,
+                "fps": 0.0,
+                "stability": 0.0,
+                "total_frames": self.total_frames,
+                "failed_frames": self.failed_frames
+            }
 
-# Example usage
-# ai_processor = Processor('yolov3.weights', 'yolov3.cfg', 'coco.names')
+        avg_inf = sum(self.inference_times) / len(self.inference_times)
+        fps = 1000.0 / avg_inf
+        stability = (self.total_frames - self.failed_frames) / self.total_frames if self.total_frames > 0 else 0.0
+
+        return {
+            "avg_inference_ms": round(avg_inf, 2),
+            "fps": round(fps, 2),
+            "stability": round(stability, 4),
+            "total_frames": self.total_frames,
+            "failed_frames": self.failed_frames
+        }
+
+    # Example usage
+    # ai_processor = Processor('yolov3.weights', 'yolov3.cfg', 'coco.names')
